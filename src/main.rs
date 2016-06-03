@@ -11,6 +11,70 @@ use std::str;
 use self::State::*;
 use self::CommandType::*;
 
+
+struct SymbolTable {
+  lookup: HashMap<String, String>
+}
+
+impl SymbolTable {
+  fn new() -> SymbolTable {
+    let mut l = HashMap::new();
+
+    l.insert(String::from("R0"), SymbolTable::u16_to_bin(0));
+    l.insert(String::from("R1"), SymbolTable::u16_to_bin(1));
+    l.insert(String::from("R2"), SymbolTable::u16_to_bin(2));
+    l.insert(String::from("R3"), SymbolTable::u16_to_bin(3));
+    l.insert(String::from("R4"), SymbolTable::u16_to_bin(4));
+
+    SymbolTable {
+      lookup: l
+    }
+  }
+
+  fn is_valid_address(addr : &String) -> bool {
+    addr.chars().fold(true, |is_number, c| {
+      is_number && (c as u8) >= 48 && (c as u8) <= 57
+    })
+  }
+
+  fn string_to_u16(num : & String) -> u16 {
+    let length = num.len() - 1;
+    let mut total : u16 = 0;
+
+    for (i, c) in num.chars().enumerate() {
+      total += (c as u16 - 48) * 10u16.pow(length as u32 - i as u32);
+    }
+
+    total
+  }
+
+  fn u16_to_bin(input : u16) -> String {
+    let mut command : String  = String::with_capacity(16);
+    let mut num = input;
+
+    while num > 0 {
+      let remainder = num % 2;
+      command.push((remainder as u8 + 48) as char);
+      num = num / 2;
+    }
+
+    // left pad
+    while command.len() < 16 {
+      command = command + "0";
+    }
+
+    command.chars().rev().collect()
+  }
+
+  fn insert(&mut self, key : &String, val : &String) {
+    self.lookup.insert(key.clone(), val.clone());
+  }
+
+  fn get(&self, key : &String) -> Option<&String>{
+    self.lookup.get(key)
+  }
+}
+
 struct CommandLookup<'a> {
   destination: HashMap<&'a str, &'a str>,
   compare: HashMap<&'a str, &'a str>,
@@ -114,9 +178,11 @@ enum CommandType {
 }
 
 struct Parser<'a> {
+  input: &'a String,
   iter: Peekable<Chars<'a>>,
   curr: char,
   state: State,
+  count: u16,
 
   dest: String,
   jump: String,
@@ -132,9 +198,11 @@ impl<'a> Parser<'a> {
     let curr = iter.next().unwrap();
 
     Parser {
+      input: input,
       iter: iter,
       curr: curr,
       state: StartLine,
+      count: 0,
       
       dest: String::new(),
       jump: String::new(),
@@ -143,6 +211,18 @@ impl<'a> Parser<'a> {
 
       command_type: Invalid
     }
+  }
+
+  fn reset(&mut self) {
+    self.iter = self.input.chars().peekable();
+    self.curr = self.iter.next().unwrap();
+    self.count = 0;
+    self.state = StartLine;
+    self.dest.clear();
+    self.jump.clear();
+    self.comp.clear();
+    self.addr.clear();
+    self.command_type = Invalid;
   }
 
   fn eof(&mut self) -> bool {
@@ -155,33 +235,11 @@ impl<'a> Parser<'a> {
 
   fn should_ignore(c: &char) -> bool {
     match *c {
-      ' ' | '\t' | '\r'  => true,
-      _                  => false
+      ' ' | '\t' => true,
+      _          => false
     }
   }
 
-  fn get_addr(&self) -> String {
-    let mut command : String  = String::with_capacity(16);
-    let length = self.addr.len() - 1;
-    let mut total : u16 = 0;
-
-    for (i, c) in self.addr.chars().enumerate() {
-      total += (c as u16 - 48) * 10u16.pow(length as u32 - i as u32);
-    }
-
-    while total > 0 {
-      let remainder = total % 2;
-      command.push((remainder as u8 + 48) as char);
-      total = total / 2;
-    }
-
-    // left pad
-    while command.len() < 16 {
-      command = command + "0";
-    }
-
-    command.chars().rev().collect()
-  }
 
   fn bump(&mut self) {
     if self.eof() { return; }
@@ -193,6 +251,7 @@ impl<'a> Parser<'a> {
     self.comp.clear();
     self.jump.clear();
     self.dest.clear();
+    self.command_type = Invalid;
 
     loop {
       let c = self.curr;
@@ -200,6 +259,19 @@ impl<'a> Parser<'a> {
       if Parser::should_ignore(&c) {
         self.bump();
         continue;
+      }
+
+      // Check for newlines, skip them if they're consecutive
+      // Also handles the windows case of \r\n
+      if self.newline() || self.eof() { 
+        self.state = StartLine;
+        while !self.eof() && self.newline() { 
+          self.bump() 
+        }
+        if self.command_type == C || self.command_type == A {
+          self.count += 1;
+        }
+        break; 
       }
 
       match self.state {
@@ -227,13 +299,20 @@ impl<'a> Parser<'a> {
           };
         },
         InACommand => {
-          self.bump();
-          self.addr.push(c);
+          self.state = match c {
+            '/' => InComment,
+            _ => {
+              self.bump();
+              self.addr.push(c);
+              InACommand
+            }
+          }
         },
         InCCompare => {
           self.bump();
 
           self.state = match c {
+            '/' => InComment,
             '=' => {
               // '=' terminates destination chunk 
               // we've been defaulting to compare, tho
@@ -253,21 +332,30 @@ impl<'a> Parser<'a> {
           }
         },
         InCJump => {
-          self.bump();
-          self.jump.push(c);
+          self.state = match c {
+            '/' => InComment,
+            _ => {
+              self.bump();
+              self.jump.push(c);
+              InCJump
+            }
+          }
+        },
+        InLabel => {
+          self.state = match c {
+            '/' => InComment, 
+            ')' => { 
+              self.bump(); InLabel
+            },
+            _ => {
+              self.bump();
+              self.addr.push(c);
+              InLabel
+            }
+          }
         },
         _ => self.bump()
       };
-
-      // Check for newlines, skip them if they're consecutive
-      // Also handles the windows case of \r\n
-      if self.newline() || self.eof() { 
-        self.state = StartLine;
-        while !self.eof() && self.newline() { 
-          self.bump() 
-        }
-        break; 
-      }
     }
   }
 }
@@ -301,19 +389,63 @@ fn main() {
 
   let mut p = Parser::new(&contents);
   let l = CommandLookup::new();
+  let mut s = SymbolTable::new();
   let mut out : Vec<String> = Vec::new();
 
+  // Symbol pass
+  while !p.eof() {
+    p.advance();
+
+    if p.command_type == Label {
+      s.insert(&p.addr, &SymbolTable::u16_to_bin(p.count));
+    }
+  }
+
+  p.reset();
+
+  // Assemble pass
   while !p.eof() {
     p.advance();
 
     if p.command_type == A {
-      out.push(p.get_addr());
+      if SymbolTable::is_valid_address(&p.addr) {
+        let a_cmd = SymbolTable::u16_to_bin(SymbolTable::string_to_u16(&p.addr));
+        out.push(a_cmd);
+      } else {
+        match s.get(&p.addr) {
+          Some(addr) => {
+            out.push(addr.clone());
+          },
+          None => {
+            println!("Unknown symbol {}:'{}'", p.count, p.addr);
+            exit(0);
+          }
+        }
+      }
     }
 
     if p.command_type == C {
-      let comp = l.comp(&p.comp).unwrap();
-      let dest = l.dest(&p.dest).unwrap();
-      let jump = l.jump(&p.jump).unwrap();
+      let comp = match l.comp(&p.comp) {
+        Some(f) => f,
+        None => {
+          println!("Source '{}' is no good", p.comp);
+          exit(0);
+        }
+      };
+      let dest = match l.dest(&p.dest) {
+        Some(f) => f,
+        None => {
+          println!("Source '{}' is no good", p.dest);
+          exit(0);
+        }
+      };
+      let jump = match l.jump(&p.jump) {
+        Some(f) => f,
+        None => {
+          println!("Source '{}' is no good", p.jump);
+          exit(0);
+        }
+      };
       out.push("111".to_string() + comp + dest + jump);
     }
   }
