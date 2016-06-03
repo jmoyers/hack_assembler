@@ -11,9 +11,10 @@ use std::str;
 use self::State::*;
 use self::CommandType::*;
 
-
 struct SymbolTable {
-  lookup: HashMap<String, String>
+  lookup: HashMap<String, String>,
+  variable_count: u16,
+  variable_offset: u16
 }
 
 impl SymbolTable {
@@ -25,18 +26,36 @@ impl SymbolTable {
     l.insert(String::from("R2"), SymbolTable::u16_to_bin(2));
     l.insert(String::from("R3"), SymbolTable::u16_to_bin(3));
     l.insert(String::from("R4"), SymbolTable::u16_to_bin(4));
+    l.insert(String::from("R5"), SymbolTable::u16_to_bin(5));
+    l.insert(String::from("R6"), SymbolTable::u16_to_bin(6));
+    l.insert(String::from("R7"), SymbolTable::u16_to_bin(7));
+    l.insert(String::from("R8"), SymbolTable::u16_to_bin(8));
+    l.insert(String::from("R9"), SymbolTable::u16_to_bin(9));
+    l.insert(String::from("R10"), SymbolTable::u16_to_bin(10));
+    l.insert(String::from("R11"), SymbolTable::u16_to_bin(11));
+    l.insert(String::from("R12"), SymbolTable::u16_to_bin(12));
+    l.insert(String::from("R13"), SymbolTable::u16_to_bin(13));
+    l.insert(String::from("R14"), SymbolTable::u16_to_bin(14));
+    l.insert(String::from("R15"), SymbolTable::u16_to_bin(15));
+    l.insert(String::from("SCREEN"), SymbolTable::u16_to_bin(0x4000u16));
+    l.insert(String::from("KBD"), SymbolTable::u16_to_bin(0x6000u16));
+
 
     SymbolTable {
-      lookup: l
+      lookup: l,
+      variable_count: 0,
+      variable_offset: 15
     }
   }
 
-  fn is_valid_address(addr : &String) -> bool {
+  // assume ascii, don't validate upper/lower bound
+  fn is_address(addr : &String) -> bool {
     addr.chars().fold(true, |is_number, c| {
       is_number && (c as u8) >= 48 && (c as u8) <= 57
     })
   }
 
+  // apparently .parse() does this, oh well
   fn string_to_u16(num : & String) -> u16 {
     let length = num.len() - 1;
     let mut total : u16 = 0;
@@ -49,21 +68,28 @@ impl SymbolTable {
   }
 
   fn u16_to_bin(input : u16) -> String {
-    let mut command : String  = String::with_capacity(16);
+    let mut bin : String  = String::with_capacity(16);
     let mut num = input;
 
     while num > 0 {
-      let remainder = num % 2;
-      command.push((remainder as u8 + 48) as char);
+      let rem = num % 2;
+      bin.push((rem as u8 + 48) as char);
       num = num / 2;
     }
 
     // left pad
-    while command.len() < 16 {
-      command = command + "0";
+    while bin.len() < 16 {
+      bin = bin + "0";
     }
 
-    command.chars().rev().collect()
+    bin.chars().rev().collect()
+  }
+
+  fn insert_variable(&mut self, key : &String) {
+    let target = self.variable_offset + self.variable_count;
+    let addr = SymbolTable::u16_to_bin(target);
+    self.lookup.insert(key.clone(), addr);
+    self.variable_count += 1;
   }
 
   fn insert(&mut self, key : &String, val : &String) {
@@ -396,6 +422,14 @@ fn main() {
   while !p.eof() {
     p.advance();
 
+    if p.command_type == A &&               // If its an address
+       !SymbolTable::is_address(&p.addr) && // and its not literal
+       s.get(&p.addr).is_none()             // and we haven't seen it
+    {
+      s.insert_variable(&p.addr);
+    }
+
+    // New label entry, use the line count to assign addr
     if p.command_type == Label {
       s.insert(&p.addr, &SymbolTable::u16_to_bin(p.count));
     }
@@ -408,9 +442,9 @@ fn main() {
     p.advance();
 
     if p.command_type == A {
-      if SymbolTable::is_valid_address(&p.addr) {
-        let a_cmd = SymbolTable::u16_to_bin(SymbolTable::string_to_u16(&p.addr));
-        out.push(a_cmd);
+      if SymbolTable::is_address(&p.addr) {
+        let addr = SymbolTable::u16_to_bin(SymbolTable::string_to_u16(&p.addr));
+        out.push(addr);
       } else {
         match s.get(&p.addr) {
           Some(addr) => {
