@@ -1,0 +1,6 @@
+[package]
+name = "hack_assembler"
+version = "0.1.0"
+authors = ["Joshua Moyers <josh@jmoyers.org>"]
+
+[dependencies]
