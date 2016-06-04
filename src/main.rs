@@ -45,7 +45,6 @@ impl SymbolTable {
     l.insert(String::from("THIS"), SymbolTable::u16_to_bin(3));
     l.insert(String::from("THAT"), SymbolTable::u16_to_bin(4));
 
-
     SymbolTable {
       lookup: l,
       variable_count: 0,
