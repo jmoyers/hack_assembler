@@ -37,14 +37,19 @@ impl SymbolTable {
     l.insert(String::from("R13"), SymbolTable::u16_to_bin(13));
     l.insert(String::from("R14"), SymbolTable::u16_to_bin(14));
     l.insert(String::from("R15"), SymbolTable::u16_to_bin(15));
-    l.insert(String::from("SCREEN"), SymbolTable::u16_to_bin(0x4000u16));
-    l.insert(String::from("KBD"), SymbolTable::u16_to_bin(0x6000u16));
+    l.insert(String::from("SCREEN"), SymbolTable::u16_to_bin(16384));
+    l.insert(String::from("KBD"), SymbolTable::u16_to_bin(24576));
+    l.insert(String::from("SP"), SymbolTable::u16_to_bin(0));
+    l.insert(String::from("LCL"), SymbolTable::u16_to_bin(1));
+    l.insert(String::from("ARG"), SymbolTable::u16_to_bin(2));
+    l.insert(String::from("THIS"), SymbolTable::u16_to_bin(3));
+    l.insert(String::from("THAT"), SymbolTable::u16_to_bin(4));
 
 
     SymbolTable {
       lookup: l,
       variable_count: 0,
-      variable_offset: 15
+      variable_offset: 16
     }
   }
 
@@ -207,6 +212,7 @@ struct Parser<'a> {
   input: &'a String,
   iter: Peekable<Chars<'a>>,
   curr: char,
+  cmd: String,
   state: State,
   count: u16,
 
@@ -227,6 +233,7 @@ impl<'a> Parser<'a> {
       input: input,
       iter: iter,
       curr: curr,
+      cmd: String::new(),
       state: StartLine,
       count: 0,
       
@@ -242,6 +249,7 @@ impl<'a> Parser<'a> {
   fn reset(&mut self) {
     self.iter = self.input.chars().peekable();
     self.curr = self.iter.next().unwrap();
+    self.cmd.clear();
     self.count = 0;
     self.state = StartLine;
     self.dest.clear();
@@ -277,18 +285,19 @@ impl<'a> Parser<'a> {
     self.comp.clear();
     self.jump.clear();
     self.dest.clear();
+    self.cmd.clear();
     self.command_type = Invalid;
 
     loop {
       let c = self.curr;
 
+      // Ignore tabs and space
       if Parser::should_ignore(&c) {
         self.bump();
         continue;
       }
 
-      // Check for newlines, skip them if they're consecutive
-      // Also handles the windows case of \r\n
+      // Stop parsing if we hit a newline
       if self.newline() || self.eof() { 
         self.state = StartLine;
         while !self.eof() && self.newline() { 
@@ -382,6 +391,8 @@ impl<'a> Parser<'a> {
         },
         _ => self.bump()
       };
+
+      self.cmd.push(c);
     }
   }
 }
@@ -418,16 +429,9 @@ fn main() {
   let mut s = SymbolTable::new();
   let mut out : Vec<String> = Vec::new();
 
-  // Symbol pass
+  // Label pass
   while !p.eof() {
     p.advance();
-
-    if p.command_type == A &&               // If its an address
-       !SymbolTable::is_address(&p.addr) && // and its not literal
-       s.get(&p.addr).is_none()             // and we haven't seen it
-    {
-      s.insert_variable(&p.addr);
-    }
 
     // New label entry, use the line count to assign addr
     if p.command_type == Label {
@@ -437,6 +441,21 @@ fn main() {
 
   p.reset();
 
+  // Variable pass
+  while !p.eof() {
+    p.advance();
+
+    if p.command_type == A &&               // If its an address
+       !SymbolTable::is_address(&p.addr) && // and its not literal
+       s.get(&p.addr).is_none()             // and we haven't seen it
+    {
+      // println!("{}", p.addr);
+      s.insert_variable(&p.addr);
+    }
+  }
+ 
+  p.reset();
+
   // Assemble pass
   while !p.eof() {
     p.advance();
@@ -444,10 +463,13 @@ fn main() {
     if p.command_type == A {
       if SymbolTable::is_address(&p.addr) {
         let addr = SymbolTable::u16_to_bin(SymbolTable::string_to_u16(&p.addr));
+        //println!("Addr: {}:'{}'", p.addr, addr);
+        //out.push(p.cmd.clone());
         out.push(addr);
       } else {
         match s.get(&p.addr) {
           Some(addr) => {
+            //out.push(p.cmd.clone());
             out.push(addr.clone());
           },
           None => {
@@ -480,6 +502,7 @@ fn main() {
           exit(0);
         }
       };
+      //out.push(p.cmd.clone());
       out.push("111".to_string() + comp + dest + jump);
     }
   }
