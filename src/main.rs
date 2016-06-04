@@ -449,7 +449,6 @@ fn main() {
        !SymbolTable::is_address(&p.addr) && // and its not literal
        s.get(&p.addr).is_none()             // and we haven't seen it
     {
-      // println!("{}", p.addr);
       s.insert_variable(&p.addr);
     }
   }
@@ -463,17 +462,14 @@ fn main() {
     if p.command_type == A {
       if SymbolTable::is_address(&p.addr) {
         let addr = SymbolTable::u16_to_bin(SymbolTable::string_to_u16(&p.addr));
-        //println!("Addr: {}:'{}'", p.addr, addr);
-        //out.push(p.cmd.clone());
         out.push(addr);
       } else {
         match s.get(&p.addr) {
           Some(addr) => {
-            //out.push(p.cmd.clone());
             out.push(addr.clone());
           },
           None => {
-            println!("Unknown symbol {}:'{}'", p.count, p.addr);
+            println!("Error: Unknown symbol {}:'{}'", p.count, p.addr);
             exit(0);
           }
         }
@@ -484,25 +480,24 @@ fn main() {
       let comp = match l.comp(&p.comp) {
         Some(f) => f,
         None => {
-          println!("Source '{}' is no good", p.comp);
+          println!("Error: Expected comp, got '{}'", p.comp);
           exit(0);
         }
       };
       let dest = match l.dest(&p.dest) {
         Some(f) => f,
         None => {
-          println!("Source '{}' is no good", p.dest);
+          println!("Error: Expected dest, got '{}'", p.dest);
           exit(0);
         }
       };
       let jump = match l.jump(&p.jump) {
         Some(f) => f,
         None => {
-          println!("Source '{}' is no good", p.jump);
+          println!("Error: Expected jump, got'{}'", p.jump);
           exit(0);
         }
       };
-      //out.push(p.cmd.clone());
       out.push("111".to_string() + comp + dest + jump);
     }
   }
